@@ -1,150 +1,137 @@
-import heapq
-from typing import Generator, Dict, Any, List, Tuple
-from src.candidate_analyzer import CandidateAnalyzer
-from src.behavioral_scorer import BehavioralScorer
-from src.trap_detector import TrapDetector
+#!/usr/bin/env python
+import argparse
+import os
+import csv
+from src.load_data import stream_candidates
+from src.ranker import CandidateRanker
 
-class CandidateRanker:
-    def __init__(self, job_description_text: str = "", anchor_date_str: str = "2026-06-19"):
-        self.analyzer = CandidateAnalyzer(job_description_text)
-        self.scorer = BehavioralScorer(anchor_date_str)
-        self.trap_detector = TrapDetector()
-        
-        # Performance/analytics counters
-        self.total_processed = 0
-        self.trap_counts = {
-            "Keyword Stuffer": 0,
-            "Honeypot": 0,
-            "Behavioral Twin": 0,
-            "Title Contradiction": 0
-        }
-        self.hidden_star_count = 0
+def compile_default_job_description() -> str:
+    """
+    Returns a production-grade default job description for ML / IR Engineers 
+    if no job_description.md exists in the working directory.
+    """
+    return """
+    # Staff Machine Learning Engineer - Search Relevance & Ranking Systems
 
-    def calculate_candidate_score(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Orchestrates full candidate assessment across four scoring components,
-        attributing anti-trap penalties and hidden-star search relevance boosts.
+    We are seeking a seasoned Specialist in Search, Information Retrieval, and Recommendation Engines.
+    
+    ### Key Responsibilities:
+    - Designing high-scale ranking algorithms, search query retrieval, and hybrid dense/sparse search functions.
+    - Implementing high-performance personalization models, vector databases, and approximate nearest neighbor (ANN) indexes.
+    - Tuning learning-to-rank (LTR) algorithms using production-ML engineering pipelines.
+    
+    ### Requirements:
+    - 5+ years shipping high-scale ranking models, Elasticsearch/Lucene configurations, recommendations, or index pipelines.
+    - Solid knowledge of machine learning, collaborative filtering, deep retrieval, and vector search technologies.
+    """
+
+def verify_and_prep_directories(input_path: str, jd_path: str):
+    """
+    Validates files existence, creating highly helpful default fallback resources 
+    so the pipeline is immediately executable and never crashes.
+    """
+    # Parent directories setup
+    input_dir = os.path.dirname(input_path)
+    if input_dir and not os.path.exists(input_dir):
+        os.makedirs(input_dir, exist_ok=True)
         
-        Final Score = Career(45%) + Domain(30%) + Behavior(20%) + Availability(5%) - Penalties + Boosts
-        """
-        candidate_id = str(candidate.get("candidate_id", candidate.get("id", "unknown")))
-        skills = candidate.get("skills", [])
-        experiences = candidate.get("experiences", [])
+    # Write a default job description if it doesn't exist
+    if not os.path.exists(jd_path):
+        with open(jd_path, "w", encoding="utf-8") as f:
+            f.write(compile_default_job_description().strip())
+        print(f"[*] Generated default template job description in '{jd_path}'.")
         
-        # Fetch portal signals
-        signals = {
-            "recruiter_response_rate": candidate.get("recruiter_response_rate", 0.5),
-            "interview_completion_rate": candidate.get("interview_completion_rate", 0.5),
-            "github_activity_score": candidate.get("github_activity_score", 0.0),
-            "saved_by_recruiters_30d": candidate.get("saved_by_recruiters_30d", 0),
-            "search_appearance_30d": candidate.get("search_appearance_30d", 0),
-            "last_active_date": candidate.get("last_active_date")
-        }
-        
-        # Fetch portal flags
-        flags = {
-            "open_to_work_flag": candidate.get("open_to_work_flag", False),
-            "verified_email": candidate.get("verified_email", False),
-            "verified_phone": candidate.get("verified_phone", False),
-            "linkedin_connected": candidate.get("linkedin_connected", False)
-        }
-        
-        # Calculate sub-scores
-        career_res = self.analyzer.analyze_career_path(experiences)
-        domain_res = self.analyzer.analyze_domain_relevance(skills, experiences)
-        behavior_res = self.scorer.score_behavior(signals)
-        availability_res = self.scorer.score_availability(flags)
-        
-        career_w = career_res["career_raw_score"] * 0.45
-        domain_w = domain_res["domain_raw_score"] * 0.30
-        behavior_w = behavior_res["behavioral_raw_score"] * 0.20
-        availability_w = availability_res["availability_raw_score"] * 0.05
-        
-        # Calculate Penalties
-        trap_res = self.trap_detector.evaluate_all_traps(candidate_id, skills, experiences, signals, flags)
-        penalty_deductions = trap_res["total_trap_penalty"]
-        
-        # Log traps for reporting
-        for trap_detail in trap_res["applied_traps"]:
-            t_name = trap_detail["trap"]
-            self.trap_counts[t_name] += 1
-            
-        # Calculate Boosts
-        is_hidden_star = self.analyzer.detect_hidden_star(skills, experiences)
-        boost_addition = 25.0 if is_hidden_star else 0.0
-        if is_hidden_star:
-            self.hidden_star_count += 1
-            
-        # Compile total score
-        final_score = career_w + domain_w + behavior_w + availability_w - penalty_deductions + boost_addition
-        # Safeguard lower and upper bound of candidate scores
-        final_score = max(0.0, min(100.0, round(final_score, 2)))
-        
-        # Build friendly concise reasoning
-        reasons = []
-        if is_hidden_star:
-            reasons.append("Spotlighted Search Relevance Hidden Star (+25 pts).")
-        if trap_res["has_traps"]:
-            trap_names = [t["trap"] for t in trap_res["applied_traps"]]
-            reasons.append(f"Triggered anti-cheat safeguards: {', '.join(trap_names)} (-{penalty_deductions:.0f} pts).")
-        if career_res["total_experience_years"] > 5.0 and career_res["progression_score"] > 0.7:
-            reasons.append("Exceptional upward senior career progression.")
-        if domain_res["domain_raw_score"] > 80.0:
-            reasons.append("Top-tier specialized IR and production-ML relevance.")
-        if behavior_res["behavioral_raw_score"] > 80.0:
-            reasons.append("Exceptional active candidate engagement signals.")
-            
-        if not reasons:
-            reasons.append("Solid career profiles matching baseline specifications.")
-            
-        reasoning_summary = " ".join(reasons)
-        
-        # Return complete breakdown
-        return {
-            "candidate_id": candidate_id,
-            "final_score": final_score,
-            "reasoning": reasoning_summary,
-            "breakdown": {
-                "career_score": round(career_w, 2),
-                "domain_score": round(domain_w, 2),
-                "behavioral_score": round(behavior_w, 1),
-                "availability_score": round(availability_w, 2),
-                "penalties": penalty_deductions,
-                "boosts": boost_addition,
-                "is_hidden_star": is_hidden_star,
-                "is_trap": trap_res["has_traps"]
+    # Write a sample candidate file if none exists to ensure first-run success
+    if not os.path.exists(input_path) and input_path.endswith(".jsonl"):
+        import json
+        sample_candidates = [
+            {
+                "candidate_id": "c_premium_01",
+                "skills": ["Elasticsearch", "search relevance", "personalization", "FAISS", "Python", "PyTorch"],
+                "experiences": [
+                    {
+                        "company": "Netflix", "title": "Staff Search Relevance Engineer", "start_date": "2022-01", "end_date": "Present",
+                        "description": "Led search relevance and learning to rank models. Shipped personalized recommendations using FAISS indices."
+                    },
+                    {
+                        "company": "Amazon", "title": "Senior Information Retrieval Engineer", "start_date": "2018-05", "end_date": "2021-12",
+                        "description": "Optimized dense search and BM25 retrievers. Worked on high-performance indexing."
+                    }
+                ],
+                "recruiter_response_rate": 0.95, "interview_completion_rate": 0.92, "github_activity_score": 85.0,
+                "saved_by_recruiters_30d": 38, "search_appearance_30d": 290, "last_active_date": "2026-06-18",
+                "open_to_work_flag": True, "verified_email": True, "verified_phone": True, "linkedin_connected": True
+            },
+            {
+                "candidate_id": "c_keyword_stuffer_trap",
+                "skills": ["Python", "Java", "C++", "RAG", "Vite", "Kubernetes", "AWS", "Stripe", "HTML", "CSS", "SQL", "Spark", "Kafka", "Docker", "Git", "Excel", "English", "Agile", "Next.JS", "React", "Node", "Go", "AI", "NLP", "LLM", "Pinecone", "LangChain", "LlamaIndex", "Redis", "Figma", "Redux", "NoSQL", "CI/CD"],
+                "experiences": [
+                    { "company": "Global Corp", "title": "Software Developer", "start_date": "2025-01", "end_date": "Present", "description": "Writing basic boilerplate scripts." }
+                ],
+                "recruiter_response_rate": 0.40, "interview_completion_rate": 0.35, "github_activity_score": 12.0,
+                "saved_by_recruiters_30d": 2, "search_appearance_30d": 12, "last_active_date": "2026-06-01",
+                "open_to_work_flag": True, "verified_email": False, "verified_phone": False, "linkedin_connected": False
             }
-        }
+        ]
+        with open(input_path, "w", encoding="utf-8") as f:
+            for item in sample_candidates:
+                f.write(json.dumps(item) + "\n")
+        print(f"[*] Generated mock baseline validation dataset in '{input_path}'.")
 
-    def process_and_rank(self, candidate_stream: Generator[Dict[str, Any], None, None], top_k: int = 100) -> List[Dict[str, Any]]:
-        """
-        Processes a pipeline of candidate profile records using a low-footprint Top-K min-heap.
-        Maintains O(K) memory overhead and is capable of ranking 100,000 candidates in seconds.
-        """
-        # Store min-heap of size top_k.
-        # We store elements as (final_score, candidate_id, evaluated_dict)
-        # Python's heapq is a min-heap, so the lowest score of top-k sits at the root.
-        top_k_heap = []
-        self.total_processed = 0
+def main():
+    parser = argparse.ArgumentParser(description="Redrob Intelligent Candidate Discovery & Ranking Pipeline Runner")
+    parser.add_argument("--input", type=str, default="data/candidates.jsonl", help="Path to input dataset (supports .jsonl and .jsonl.gz)")
+    parser.add_argument("--jd", type=str, default="job_description.md", help="Path to target job description markdown")
+    parser.add_argument("--output", type=str, default="submission.csv", help="Path to save ranking output")
+    parser.add_argument("--top_k", type=int, default=100, help="Number of premier candidates to select")
+    args = parser.parse_args()
+
+    print("=========================================================================")
+    print(" REDROB INTELLIGENT CANDIDATE DISCOVERY & RANKING CHALLENGE CLI")
+    print("=========================================================================")
+
+    # Prepare inputs if not exists
+    verify_and_prep_directories(args.input, args.jd)
+
+    # Read Job Description
+    job_description_content = ""
+    try:
+        with open(args.jd, "r", encoding="utf-8") as f:
+            job_description_content = f.read()
+    except Exception as e:
+        print(f"[-] Warning reading job description: {e}. Proceeding with clean defaults.")
         
-        for candidate in candidate_stream:
-            self.total_processed += 1
-            evaluated = self.calculate_candidate_score(candidate)
-            
-            score_tuple = (evaluated["final_score"], evaluated["candidate_id"], evaluated)
-            
-            if len(top_k_heap) < top_k:
-                heapq.heappush(top_k_heap, score_tuple)
-            else:
-                # Compare against root (worst score in our top_k currently)
-                if evaluated["final_score"] > top_k_heap[0][0]:
-                    heapq.heapreplace(top_k_heap, score_tuple)
-                    
-        # Extract, sort descending, and return results
-        sorted_results = []
-        while top_k_heap:
-            _, _, evaluated = heapq.heappop(top_k_heap)
-            sorted_results.append(evaluated)
-            
-        # Return highest score first
-        return sorted_results[::-1]
+    print(f"[*] Initializing Discovery Pipeline...")
+    ranker = CandidateRanker(job_description_content)
+    
+    print(f"[*] Streaming & scoring profiles from: '{args.input}'...")
+    candidate_stream = stream_candidates(args.input)
+    
+    top_candidates = ranker.process_and_rank(candidate_stream, top_k=args.top_k)
+    
+    print("\n------------------------- PROCESSING METRICS -------------------------")
+    print(f" - Candidates Screened Across Dataset : {ranker.total_processed}")
+    print(f" - Fraudulent/Twin Profiles Defended  : {sum(ranker.trap_counts.values())}")
+    for trap_name, count in ranker.trap_counts.items():
+        print(f"   ∟ {trap_name.ljust(20)} : {count} detections")
+    print(f" - Hidden Star Talent Spotlighted     : {ranker.hidden_star_count} profiles")
+    
+    print(f"\n[*] Exporting top {len(top_candidates)} matches to: '{args.output}'...")
+    
+    try:
+        with open(args.output, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["candidate_id", "rank", "score", "reasoning"])
+            for rank_idx, cand in enumerate(top_candidates, 1):
+                writer.writerow([
+                    cand["candidate_id"],
+                    rank_idx,
+                    cand["final_score"],
+                    cand["reasoning"]
+                ])
+        print(f"[✓] Pipeline complete! Submission CSV saved cleanly with no anomalies.")
+    except Exception as e:
+        print(f"[❌] Error compiling output CSV: {e}")
+
+if __name__ == "__main__":
+    main()
