@@ -28,6 +28,5 @@ steps:
     run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
 
   - name: Run Tests
-    run: |
-      pytest tests -v
+    run: pytest -v
 ```
