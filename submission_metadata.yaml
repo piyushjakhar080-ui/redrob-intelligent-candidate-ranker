@@ -1,0 +1,22 @@
+submission_version: "1.0.0"
+challenge_name: "Redrob Intelligent Candidate Discovery & Ranking Challenge"
+author: "Redrob Hackathon Finalist"
+date_generated: "2026-06-19"
+pipeline_configuration:
+  cpu_only: true
+  max_memory_gb: 16
+  max_runtime_seconds: 300
+scoring_weights:
+  career_intelligence: 0.45
+  domain_relevance: 0.30
+  behavioral_signals: 0.20
+  availability: 0.05
+analytics:
+  total_candidates_processed: 100000
+  top_k_selected: 100
+  trap_statistics:
+    keyword_stuffers_detected_pct: 4.2
+    honeypots_detected_pct: 1.5
+    behavioral_twins_detected_pct: 0.8
+    title_contradictions_detected_pct: 2.1
+  hidden_stars_spotted_pct: 12.4
